@@ -1,0 +1,294 @@
+---
+title: "RFM"
+author: "Azim Tamboli"
+date: "2022-12-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("readr")
+#install.packages("rlang")
+library(readr)
+customers_df= read_csv('olist_customers_dataset.csv', show_col_types = FALSE)
+geolocation_df= read_csv("olist_geolocation_dataset.csv", show_col_types = FALSE)
+items_df= read_csv('olist_order_items_dataset.csv', show_col_types = FALSE)
+payments_df= read_csv('olist_order_payments_dataset.csv', show_col_types = FALSE)
+reviews_df= read_csv('olist_order_reviews_dataset.csv', show_col_types = FALSE)
+orders_df= read_csv('olist_orders_dataset.csv', show_col_types = FALSE)
+products_df= read_csv('olist_products_dataset.csv', show_col_types = FALSE)
+sellers_df= read_csv('olist_sellers_dataset.csv', show_col_types = FALSE)
+category_translation_df= read_csv('product_category_name_translation.csv', show_col_types = FALSE)
+```
+
+```{r}
+customers_df
+geolocation_df
+orders_df
+products_df
+sellers_df
+items_df
+payments_df
+category_translation_df
+```
+
+```{r}
+colnames(customers_df)[3] <- "zip_code"
+colnames(geolocation_df)[1] <- "zip_code"
+```
+
+
+```{r}
+#customers_df
+#geolocation_df
+#install.packages("vctrs")
+#install.packages("Rtools")
+library(tidyverse)
+library(RSQLite)
+
+data <- inner_join(orders_df, customers_df,  by=c("customer_id"="customer_id"))
+data <- inner_join(data, items_df,  by=c("order_id"="order_id"))
+data <- inner_join(data, products_df,  by=c("product_id"="product_id"))
+data <- inner_join(data, category_translation_df,  by=c("product_category_name"="product_category_name"))
+data <- inner_join(data, payments_df,  by=c("order_id"="order_id"))
+data <- inner_join(data, sellers_df,  by=c("seller_id"="seller_id"))
+data <- inner_join(data, reviews_df,  by=c("order_id"="order_id"))
+data
+```
+
+```{r}
+data %>%
+  ggplot(aes(x=review_score)) + 
+  geom_bar(aes(x=review_score))  + 
+  labs(title="Distribution of Review Score", x = "Rating", y="Count") +
+  theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.y=element_text(size=7))
+
+data["review_score"]
+```
+## We can see that majority of ratings are given as 5 and approximately 30% ratings are from 1 to 4.
+
+# Proportion of customers generating most of the revenue:
+
+```{r}
+top_customers <- data %>% group_by(customer_unique_id) %>% summarise(total_paid = sum(payment_value))
+top_customers <- arrange(top_customers, desc(total_paid))
+
+
+top_customers["% of Total Sales"] = (top_customers["total_paid"] / sum(top_customers["total_paid"])) * 100
+top_customers["Cum % of Total Sales"] = cumsum(top_customers["% of Total Sales"])
+
+top_customers %>%
+  ggplot(aes(x= 1:length(top_customers[[1]]), y = `Cum % of Total Sales`)) +
+  geom_point() + geom_smooth() +
+  labs(title="% Distribution to Sales by number of customers", x = "No of Customers", y="Cum % of Total Sales") +
+  theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.y=element_text(size=7))
+
+```
+## Around 50k customers (approx 53% of total customers) contribute to approx  87% of total sales.
+
+# Who are the top customers?
+
+```{r}
+ arrange(top_customers[1:10,], desc(total_paid)) %>%
+  ggplot(aes(x= reorder(customer_unique_id , total_paid), y = total_paid)) + 
+  geom_bar(stat = "identity")  + 
+  labs(title="Top 10 customers by total paid", y = "Total Paid", x ="Customer Id") +
+  coord_flip() +
+  theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.y=element_text(size=7))
+
+```
+
+# Top cites by number of orders by state
+
+```{r}
+top_order_states = data %>% group_by(customer_state) %>% summarise(count = n()) %>% arrange(desc(count))
+  
+ arrange(top_order_states[1:10,], desc(count)) %>%
+  ggplot(aes(x= reorder(customer_state , count), y = count)) + 
+  geom_bar(stat = "identity")  + 
+  labs(title="TOP 10 states by number of orders", x = "States", y="Count") +
+  coord_flip() +
+  theme(plot.title = element_text(hjust = 0.5)) + theme(axis.text.y=element_text(size=7))
+
+```
+
+# RFM Analysis
+
+```{r}
+# Lets calculate Recency
+
+df_rececy = data %>% group_by(customer_unique_id) %>% summarise(max(order_purchase_timestamp, na.rm=TRUE))
+colnames(df_rececy)[2] <- "LastPurchaseDate"
+
+df_rececy$LastPurchaseDate <- as.Date(df_rececy$LastPurchaseDate , format = "yyyy-mm-dd")
+
+recent_date = max(as.Date(data$order_purchase_timestamp , format = "yyyy-mm-dd"))
+recent_date = as.Date(recent_date, "yyyy-mm-dd")
+df_rececy['RecentDate'] = recent_date
+df_rececy['Recency'] = df_rececy['RecentDate'] - df_rececy['LastPurchaseDate']
+df_rececy['Recency'] <- as.integer(unlist(df_rececy['Recency']))
+```
+
+```{r}
+# Lets calculate Frequency:
+df_frequency <- data %>% group_by(customer_unique_id) %>% summarise(Frequency = n())
+df_frequency
+```
+
+```{r}
+# Lets calculate Monetray:
+df_monetray <- data %>% group_by(customer_unique_id) %>% summarise(Monetray = sum(payment_value, na.rm = TRUE))
+df_monetray
+```
+
+
+```{r}
+#Lets merge the  
+df_rfm <- inner_join(df_rececy, df_frequency,  by=c("customer_unique_id"="customer_unique_id"))
+df_rfm <- inner_join(df_rfm, df_monetray,  by=c("customer_unique_id"="customer_unique_id"))
+df_rfm <- subset(df_rfm, select = -c(LastPurchaseDate,RecentDate ))
+df_rfm$Recency <- as.integer(df_rfm[[2]])
+df_rfm[df_rfm == 0] <- 1
+
+mean(df_rfm$Recency)
+mean(df_rfm$Frequency)
+mean(df_rfm$Monetray)
+```
+
+
+```{r}
+# check for the skewness
+#install.packages("moments")
+library(moments)
+
+recency_skew <- skewness(df_rfm[2])
+frequency_skew <- skewness(df_rfm[3])
+monetray_skew <- skewness(df_rfm[4])
+
+print("--- Skewness ----")
+print(recency_skew)
+print(frequency_skew)
+print(monetray_skew)
+
+ggplot(df_rfm, aes(x = Recency)) +    # Draw histogram & density
+  geom_histogram(aes(y = ..density..)) + 
+  geom_density(col = "#1b98e0", size = 1)
+
+ggplot(df_rfm, aes(x = Frequency)) +    # Draw histogram & density
+  geom_histogram(aes(y = ..density..)) + 
+  geom_density(col = "#1b98e0", size = 1)
+
+ggplot(df_rfm, aes(x = Monetray)) +    # Draw histogram & density
+  geom_histogram(aes(y = ..density..)) + 
+  geom_density(col = "#1b98e0", size = 1)
+
+```
+
+## When the skewness value is larger than 1 or lower than -1, the distribution is strongly skewed. A mildly skewed value is one between 0.5 and 1 or -0.5 and -1. When the value falls between -0.5 and 0.5, the distribution is considered to be fairly symmetrical.
+
+## Since frequency and monetary are significantly skewed, we will log transform them.
+
+```{r}
+rfm_df_log = data.frame(df_rfm)
+rfm_df_log
+rfm_df_log[3] = log10(rfm_df_log[3])
+rfm_df_log[4] = log10(rfm_df_log[4])
+rfm_df_log
+```
+
+```{r}
+recency_skew <- skewness(rfm_df_log[2])
+frequency_skew <- skewness(rfm_df_log[3])
+monetray_skew <- skewness(rfm_df_log[4])
+
+print("--- Skewness ----")
+print(recency_skew)
+print(frequency_skew)
+print(monetray_skew)
+
+ggplot(rfm_df_log, aes(x = Recency)) +    # Draw histogram & density
+  geom_histogram(aes(y = ..density..)) + 
+  geom_density(col = "#1b98e0", size = 1)
+
+ggplot(rfm_df_log, aes(x = Frequency)) +    # Draw histogram & density
+  geom_histogram(aes(y = ..density..)) + 
+  geom_density(col = "#1b98e0", size = 1)
+
+ggplot(rfm_df_log, aes(x = Monetray)) +    # Draw histogram & density
+  geom_histogram(aes(y = ..density..)) + 
+  geom_density(col = "#1b98e0", size = 1)
+```
+
+```{r}
+RFM_Table_scaled <- data.frame(scale(rfm_df_log[2:4]))
+head(RFM_Table_scaled)
+```
+
+
+
+```{r}
+dist <- list()
+for (i in 1:10) {
+  t <- kmeans(RFM_Table_scaled, centers = i, nstart = 10)
+  dist <- append(dist, t$tot.withinss)
+}
+unlist(dist)
+x <- 1:10
+
+df_dist <- data.frame(x,unlist(dist))
+colnames(df_dist)[1] <- "x"
+colnames(df_dist)[2] <- "y"
+
+y_labels = c("0", "50k","100k","150k","200k", "250k", "300k")
+
+df_dist %>%
+ggplot(aes(x = x, y = y)) +
+  geom_point() +
+  geom_line(color="red") + scale_x_continuous(limits=c(1,10), breaks=seq(1,10, 1) ,labels=1:10) +
+  scale_y_continuous(limits = c(49000,300000), breaks=seq(50000,300000, 50000)) +
+  labs(title = "The Elbow Method showing the optimal k", x = "K", y= "Distortion")  + theme(text = element_text(size = 15))  
+
+```
+
+```{r}
+final_model <- kmeans(RFM_Table_scaled, centers = 4, nstart = 10)
+#final_model$cluster
+
+df_rfm['Cluster'] = final_model$cluster
+
+df_rfm_new <- df_rfm %>% group_by(Cluster) %>% summarise(RecencyMean = mean(Recency), FrequencyMean = mean(Frequency), MonetrayMean = mean(Monetray), count = n())
+```
+
+## Due to the fact that most consumers in our data have placed an average of just one order, the Frequency attribute doesn't really offer much value to the model (mean order per customer is 1.03). In addition, most clients haven't placed an order in a while.
+
+## Cluster 1: We can refer to this cluster as Cluster 3: (Lost/Low spenders). Customers in this cluster appear to be among the most recent and have low purchase values. Marketing efforts shouldn't be concentrated on this cluster.
+
+## Cluster 2: Due to its recentness ranking second and the biggest average amount spent, this is our second best (Big spenders) cluster. In terms of the quantity of clients, this cluster is also second.
+
+## Cluster 3: Can be regarded as our best one (Loyal customers), as even if the average customer in this cluster hasn't placed an order in a while, they place orders more frequently than any other cluster and at a higher average value.
+
+## Cluster 4: This cluster can be read as (Relatively New Comers/Low Spenders) because it has the lowest recency of all the clusters while spending the least. It's a sizable cluster. Therefore, it may benefit from some marketing efforts to raise its market worth.
+
+
+```{r}
+df_rfm
+```
+
+
+```{r}
+clust1_data <- df_rfm  %>%  filter(Recency == 432, Monetray >= 100, Monetray <= 150, Frequency == 1)
+clust1_data <- inner_join(data, clust1_data, by=c("customer_unique_id"="customer_unique_id"))
+clust1_data_vis <- clust1_data %>% group_by(product_category_name) %>% summarise(quantity = sum(product_photos_qty))
+
+
+
+inner_join(clust1_data_vis, category_translation_df, by=c("product_category_name"="product_category_name")) %>% 
+  ggplot(aes(x = reorder(product_category_name_english , quantity), y=quantity)) +
+  geom_bar(aes(x = reorder(product_category_name_english , quantity), y=quantity),stat = "identity", fill = "blue") +
+  coord_flip() +
+  labs(title="Top products purchased by most loyal customers", x = "Product Category", y = "Quatity")  + theme(text = element_text(size = 15))  
+
+```
