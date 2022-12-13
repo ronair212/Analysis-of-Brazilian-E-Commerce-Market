@@ -1,0 +1,486 @@
+---
+title: "Project"
+author: "Rohit Nair"
+date: "2022-12-06"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+```{r cars}
+
+
+library(ggplot2)
+library(dplyr)
+require(maps)
+require(viridis)
+library(tidyverse)
+library(lubridate)
+library(tokenizers)
+library(tidyverse)
+library(tidytext)
+library(data.table)
+library(tm)
+library("googleLanguageR")
+library(devtools)
+library(widyr)
+library(igraph)
+library(ggraph)
+
+df_1 <-  read_csv("/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/olist_order_reviews_dataset.csv")
+
+df_1 <- df_1[!is.na(df_1$review_comment_message),]
+
+stop_words_1 = stopwords(kind = "pt")
+
+
+df_1$review_comment_message <- gsub('[0-9]+', '', df_1$review_comment_message)
+
+df_1$review_comment_message <-  gsub("\\$", "", df_1$review_comment_message)
+df_1$review_comment_message <- tolower(df_1$review_comment_message)
+
+df_1$review_comment_message  =  removeWords(df_1$review_comment_message,stop_words_1)     #Remove stopwords
+
+
+df_1 <-  df_1[df_1$review_comment_message != "é", ]
+df_1 <-  df_1[df_1$review_comment_message != "w", ]
+df_1$review_comment_message <-  gsub("xxx", "", df_1$review_comment_message)
+for(j in seq(df_1$review_comment_message))   
+   {   
+     df_1$review_comment_message[[j]] <- gsub("/", "", df_1$review_comment_message[[j]])   
+     df_1$review_comment_message[[j]] <- gsub("@", "", df_1$review_comment_message[[j]])   
+     df_1$review_comment_message[[j]] <- gsub("\\|", "", df_1$review_comment_message[[j]])
+     df_1$review_comment_message[[j]] <- gsub("<>", "", df_1$review_comment_message[[j]])
+     df_1$review_comment_message[[j]] <- gsub("<*>", "", df_1$review_comment_message[[j]])
+     df_1$review_comment_message[[j]] <- gsub("\\,", " ", df_1$review_comment_message[[j]])   
+     df_1$review_comment_message[[j]] <- gsub("\\.", "", df_1$review_comment_message[[j]])   
+     df_1$review_comment_message[[j]] <- gsub("\\!", "", df_1$review_comment_message[[j]])   
+} 
+
+df_2 <- df_1
+df_2 <-  df_2[df_1$review_score != "3", ]
+
+df_2 <- df_2 %>% mutate(sentiment_value = ifelse(review_score  >3 , 1 , 0) )
+
+df_1$review_comment_message <- trimws(df_1$review_comment_message)
+
+df_1_tidy_2 <- unnest_tokens(df_1, output="word", input=review_comment_message)
+df_1_tidy_2 <-  df_1_tidy_2[df_1_tidy_2$word != "é", ]
+df_1_tidy_2 <-  df_1_tidy_2[df_1_tidy_2$word != "c", ]
+
+df_1_tidy_2 <-  df_1_tidy_2[df_1_tidy_2$word != "n", ]
+
+
+df_1_tidy_2%>%
+count(word, sort=TRUE) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  scale_x_discrete(labels=c("great", "excellent", "liked",  "purchase",  "all","still","store", "bought",  "quality", "well","came", "delivered", "I recommend", "Good", "received", "arrived",  "before", "delivery", "deadline", "product"))+
+  geom_col() +
+  coord_flip() +
+  labs(x="Word", y="Count",
+       title="E-Commerce Reviews: 20 Most common words") +
+  theme_minimal()
+```
+
+
+```{r}
+
+
+df_1_tidy_2_tf <- count(df_1_tidy_2, review_id, word, sort=TRUE)
+
+df_1_tidy_2_tf
+
+df_1_tidy_2_wc <- df_1_tidy_2 %>%
+  group_by(review_id) %>%
+  summarize(word_count=n())
+
+df_1_tidy_2_wc
+
+df_1_tidy_2_tf <- df_1_tidy_2_tf %>%
+  left_join(df_1_tidy_2_wc) %>%
+  mutate(tf = n / word_count)
+
+df_1_tidy_2_tf
+
+df_1_tidy_2_tf <- df_1_tidy_2_tf %>%
+  mutate(n_doc = n_distinct(review_id)) %>%
+  group_by(word) %>%
+  mutate(idf = log(n_doc / n()),
+         tf_idf = tf * idf) %>%
+  select(-n_doc, -word_count) %>%
+  ungroup()
+
+
+df_1_tidy_2_tf
+arrange(df_1_tidy_2_tf, desc(tf_idf))
+arrange(df_1_tidy_2_tf, (tf_idf))
+
+
+df_1_tidy_2_tfidf <- df_1_tidy_2 %>%
+  count(review_id, word, sort=TRUE) %>%
+  bind_tf_idf(term=word, document=review_id, n=n)
+
+
+df_1_tidy_2_tfidf %>%
+  group_by(review_id) %>%
+  arrange(desc(tf_idf) , .by_group = TRUE) %>%
+  top_n(10) 
+
+df_1_tidy_2_tfidf %>%
+  distinct(tf_idf , .keep_all = TRUE )%>%
+  arrange(desc(tf_idf)) %>%
+    slice(1:20) %>%
+  ggplot(aes(x=reorder(word, tf_idf ), y=tf_idf)) +
+  geom_col(show.legend=FALSE) +
+  coord_flip() +
+  labs(x="Word", y="TF-IDF",
+       title="E-Commerce Reviews: Top 20 characteristic words by review",fill="Years") +
+  scale_fill_brewer(palette="Dark2") +
+  scale_x_reordered() +
+  theme_minimal()
+
+#good, partial, zero, delivery, show, complaint, fast delivery, delayed delivery, bad, dissatisfied, product arrived, dissatisfaction, finish, punctual, great, missing product, recommendation, product time, reasonable,  malfunctions
+#scale_x_discrete(labels=c("good"," partial"," zero"," delivery"," show"," complaint"," fast delivery"," delayed delivery"," bad"," dissatisfied"," product arrived"," dissatisfaction"," finish"," punctual"," great"," missing product"," recommendation"," product time"," reasonable","  malfunctions"))+
+
+```
+
+
+
+```{r}
+
+library(wordcloud)
+
+df_1_tidy_2 %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+
+df_1_tidy_2 %>%
+  count(word) %>%
+  arrange(desc(n))%>%
+  top_n(100)%>%
+  with(wordcloud(word, n, max.words = 100))
+
+temp <-  df_1_tidy_2 %>%
+  count(word) %>%
+  arrange(desc(n))%>%
+  top_n(100)
+write_csv(temp , "/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/olist_order_reviews_dataset_2.csv")
+
+temp2 <- read_csv("/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/DELETEolist_order_reviews_dataset_2.csv")
+
+wordcloud(words = temp2$Word, freq = temp2$n , scale = c(3,0.5))
+wordcloud(words = temp2$Word, freq = temp2$n,
+                 scale = c(3,0.5),
+                 colors = brewer.pal(8, "Dark2"))
+
+```
+
+
+
+```{r}
+# Most Frequent Bigrams
+df_1 %>%
+  unnest_tokens(bigram, review_comment_message, token = "ngrams", n = 2) %>%
+  count(bigram, sort = TRUE) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  na.omit()%>%
+  filter(n>220) %>%
+  unite(word, word1:word2, sep = " ") %>%
+  with(wordcloud(word, n,
+                 scale = c(3,0.5),
+                 colors = brewer.pal(8, "Dark2")))
+
+temp3 <- df_1 %>%
+  unnest_tokens(bigram, review_comment_message, token = "ngrams", n = 2) %>%
+  count(bigram, sort = TRUE) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  na.omit()%>%
+  filter(n>220) %>%
+  unite(word, word1:word2, sep = " ") 
+write_csv(temp3 , "/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/olist_order_reviews_dataset_3.csv")
+
+temp3 <- read_csv("/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/DELETEolist_order_reviews_dataset_3.csv")
+
+wordcloud(words = temp3$Word, freq = temp3$n,
+                 scale = c(3,0.5),
+                 colors = brewer.pal(8, "Dark2"))
+
+
+```
+
+
+
+```{r}
+#wordcloud for positive and negative comments
+df_2_pos <- df_2
+
+df_2_pos <-  df_2_pos[df_2_pos$sentiment_value != "0", ]
+
+df_2_pos$review_comment_message <-  gsub(" é ", "", df_2_pos$review_comment_message)
+df_2_pos$review_comment_message <-  gsub(" n ", "", df_2_pos$review_comment_message)
+df_2_pos$review_comment_message <-  gsub(" c ", "", df_2_pos$review_comment_message)
+df_2_pos$review_comment_message <-  gsub(" w ", "", df_2_pos$review_comment_message)
+
+
+df_2_pos%>%
+unnest_tokens(bigram, review_comment_message, token = "ngrams", n = 2) %>%
+  count(bigram, sort = TRUE) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  na.omit()%>%
+  filter(n>170) %>%
+  unite(word, word1:word2, sep = " ") %>%
+  with(wordcloud(word, n,
+                 scale = c(3,0.5),
+                 colors = brewer.pal(8, "Dark2")))
+
+temp4 <- df_2_pos%>%
+unnest_tokens(bigram, review_comment_message, token = "ngrams", n = 2) %>%
+  count(bigram, sort = TRUE) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  na.omit()%>%
+  filter(n>170) %>%
+  unite(word, word1:word2, sep = " ")
+
+write_csv(temp4 , "/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/olist_order_reviews_dataset_4.csv")
+  
+  temp4 <- read_csv("/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/DELETEolist_order_reviews_dataset_4.csv")
+  
+  wordcloud(words = temp4$Word, freq = temp4$n,
+                   scale = c(3,0.5),
+                   colors = brewer.pal(8, "Dark2"))
+
+df_3_neg <- df_2
+df_3_neg <-  df_3_neg[df_3_neg$sentiment_value != "1", ]
+
+df_3_neg$review_comment_message <-  gsub(" é ", "", df_3_neg$review_comment_message)
+df_3_neg$review_comment_message <-  gsub(" n ", "", df_3_neg$review_comment_message)
+df_3_neg$review_comment_message <-  gsub(" c ", "", df_3_neg$review_comment_message)
+df_3_neg$review_comment_message <-  gsub(" w ", "", df_3_neg$review_comment_message)
+
+df_3_neg%>%
+unnest_tokens(bigram, review_comment_message, token = "ngrams", n = 2) %>%
+  count(bigram, sort = TRUE) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  na.omit()%>%
+  filter(n>60) %>%
+  unite(word, word1:word2, sep = " ") %>%
+  with(wordcloud(word, n,
+                 scale = c(3,0.5),
+                 colors = brewer.pal(8, "Dark2")))
+
+
+temp5 <- df_3_neg%>%
+unnest_tokens(bigram, review_comment_message, token = "ngrams", n = 2) %>%
+  count(bigram, sort = TRUE) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  na.omit()%>%
+  filter(n>60) %>%
+  unite(word, word1:word2, sep = " ") 
+
+write_csv(temp5 , "/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/olist_order_reviews_dataset_5.csv")
+
+temp5 <- read_csv("/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/DELETEolist_order_reviews_dataset_5.csv")
+
+wordcloud(words = temp5$Word, freq = temp5$n,
+                 scale = c(3,0.5),
+                 colors = brewer.pal(8, "Dark2"))
+
+
+```
+
+
+
+
+
+
+
+
+```{r}
+ggplot(data = df_1, mapping = aes(x=review_score)) +
+  geom_bar()
+
+```
+
+
+```{r}
+#for titles
+
+df_1_title <-  read_csv("/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/olist_order_reviews_dataset.csv")
+
+df_1_title <- df_1_title[!is.na(df_1_title$review_comment_title),]
+
+stop_words_1 = stopwords(kind = "pt")
+
+df_1_title$review_comment_title <- gsub('[0-9]+', '', df_1_title$review_comment_title)
+df_1_title$review_comment_title <-  gsub("\\$", "", df_1_title$review_comment_title)
+df_1_title$review_comment_title <- tolower(df_1_title$review_comment_title)
+
+df_1_title$review_comment_title  =  removeWords(df_1_title$review_comment_title,stop_words_1)     #Remove stopwords
+
+df_1_title <-  df_1_title[df_1_title$review_comment_title != "é", ]
+df_1_title <-  df_1_title[df_1_title$review_comment_title != "w", ]
+df_1_title$review_comment_title <-  gsub("xxx", "", df_1_title$review_comment_title)
+for(j in seq(df_1_title$review_comment_title))   
+   {   
+     df_1_title$review_comment_title[[j]] <- gsub("/", "", df_1_title$review_comment_title[[j]])   
+     df_1_title$review_comment_title[[j]] <- gsub("@", "", df_1_title$review_comment_title[[j]])   
+     df_1_title$review_comment_title[[j]] <- gsub("\\|", "", df_1_title$review_comment_title[[j]])
+     df_1_title$review_comment_title[[j]] <- gsub("<>", "", df_1_title$review_comment_title[[j]])
+     df_1_title$review_comment_title[[j]] <- gsub("<*>", "", df_1_title$review_comment_title[[j]])
+     df_1_title$review_comment_title[[j]] <- gsub("\\,", " ", df_1_title$review_comment_title[[j]])   
+     df_1_title$review_comment_title[[j]] <- gsub("\\.", "", df_1_title$review_comment_title[[j]])   
+     df_1_title$review_comment_title[[j]] <- gsub("\\!", "", df_1_title$review_comment_title[[j]])   
+} 
+
+
+
+df_1_title$review_comment_title <- trimws(df_1_title$review_comment_title)
+
+df_1_title_tidy_2 <- unnest_tokens(df_1_title, output="word", input=review_comment_title)
+df_1_title_tidy_2 <-  df_1_title_tidy_2[df_1_title_tidy_2$word != "é", ]
+df_1_title_tidy_2 <-  df_1_title_tidy_2[df_1_title_tidy_2$word != "c", ]
+
+df_1_title_tidy_2 <-  df_1_title_tidy_2[df_1_title_tidy_2$word != "n", ]
+
+
+df_1_title_tidy_2%>%
+count(word, sort=TRUE) %>%
+  top_n(20) %>%
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  #scale_x_discrete(labels=c("fast", "received product", "bad", "purchase",  "wrong",  "no","received","perfect", "everything",  "ok", "recommended","great", "nice", "great", "delivery", "excellent", "great",  "product", "super", "good", "recommend"))+
+  geom_col() +
+  coord_flip() +
+  labs(x="Word", y="Count",
+       title="E-Commerce Reviews: 20 Most common words") +
+  theme_minimal()
+
+
+df_1_title %>%
+  unnest_tokens(bigram, review_comment_title, token = "ngrams", n = 2) %>%
+  count(bigram, sort = TRUE) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  na.omit()%>%
+  filter(n>12) %>%
+  unite(word, word1:word2, sep = " ") %>%
+  with(wordcloud(word, n,
+                 scale = c(3,0.5),
+                 colors = brewer.pal(8, "Dark2")))
+
+```
+```{r}
+
+library(tidytext)
+library (stringr)
+library(glmnet)
+library(lexiconPT)
+df_1_tidy_3 <- df_1_tidy_2
+df_1_tidy_3 <- df_1_tidy_3[!is.na(df_1_tidy_3$review_comment_title),]
+df_1_tidy_3 <- df_1_tidy_3[!is.na(df_1_tidy_3$review_score),]
+
+df_1_tidy_2_sparse <-  df_1_tidy_3  %>%
+              count(review_id,word) %>% cast_sparse(review_id ,word , n)
+
+freq <- colSums(as.matrix(df_1_tidy_2_sparse))   
+
+#tdm <- TermDocumentMatrix(df_1$review_comment_message)   
+#dtm <- DocumentTermMatrix(df_1$review_comment_message)   
+#dtms <- removeSparseTerms(dtm, 0.1)
+tweets_4_rws <- tibble(review_id = rownames(df_1_tidy_2_sparse))
+tweets_joined <- left_join(tweets_4_rws,df_1 , by="review_id")
+fit_new <- glmnet(df_1_tidy_2_sparse,tweets_joined$review_score)
+
+
+
+```
+
+```{r}
+# 
+# df_1_correlation <- df_1 %>%
+#   mutate(review = row_number()) %>%
+#   unnest_tokens(word, review_comment_message) %>%
+#   group_by(word) %>%
+#   filter(n() >= 5)%>%
+#   pairwise_cor(word, review, sort = TRUE)
+# 
+# df_1_correlation %>%
+#   filter(correlation >= 0.50) %>%
+#   graph_from_data_frame() %>%
+#   ggraph(layout = "igraph", algorithm = "kk") +
+#   geom_edge_link(aes(alpha = correlation), 
+#                  show.legend = FALSE)+
+#   geom_node_point(color = "lightblue", size = 2) +
+#   geom_node_text(aes(label = name), repel = TRUE) +
+#   theme_void()
+
+```
+
+
+
+
+```{r}
+# 
+# df_negative = read.table('/Users/rohitnair/Downloads/negative_words_pt.txt',sep='\t')
+# 
+# df_negative <- data.frame (words  = c(df_negative) , sentiment = c("negative"))
+# colnames(df_negative)=c("words","sentiment")
+# 
+# df_positive = read.table('/Users/rohitnair/Downloads/positive_words_pt.txt',sep='\t')
+# 
+# df_positive <- data.frame (words  = c(df_positive) , sentiment = c("positive"))
+# colnames(df_positive)=c("words","sentiment")
+# 
+# everything <- rbind(df_negative , df_positive)
+# 
+# d <- df_1 %>% 
+#   unnest_tokens(word, review_comment_message) %>%
+#   inner_join(everything , by = c("word"="words") ) %>%
+#   count(word, sentiment, sort = TRUE) %>%
+#   filter(n > 20) %>%
+#   mutate(word = reorder(word, n)) %>%
+#   mutate(percent = round(n/sum(n), 3))
+#  
+# write_csv(d ,"/Users/rohitnair/Downloads/Brazil_Olist_ECommerce/DELETEolist_order_reviews_dataset_3.csv")
+# 
+# 
+# df_1 %>% 
+#   unnest_tokens(word, review_comment_message) %>%
+#   inner_join(everything , by = c("word"="words") ) %>%
+#   count(word, sentiment, sort = TRUE) %>%
+#   filter(n > 20) %>%
+#   mutate(word = reorder(word, n)) %>%
+#   mutate(percent = round(n/sum(n), 3)) %>%
+#   ggplot(aes(x = word, y = percent, fill = sentiment, label = percent)) +
+#   geom_col(show.legend = FALSE) +
+#   facet_wrap(~sentiment, scales = "free_y") +
+#   geom_text(aes(y = 0.7*percent)) +
+#   labs(title = "Bose Headphones Word Polarity (bing)") +
+#   coord_flip() + 
+#   theme_bw() +
+#   theme(plot.title = element_text(hjust = 0.5))
+# 
+# 
+# #token = "ngrams", n = 2
+# 
+# df_1 %>% 
+#   unnest_tokens(word, review_comment_message) %>%
+#   inner_join(everything , by = c("word"="words") ) %>%
+#   count(word, sentiment, sort = TRUE) %>%
+#   filter(n > 20) %>%
+#   mutate(word = reorder(word, n)) %>%
+#   mutate(percent = round(n/sum(n), 3)) %>%
+#   ggplot(aes(x = word, y = percent, fill = sentiment, label = percent)) +
+#   geom_col(show.legend = FALSE) +
+#   facet_wrap(~sentiment, scales = "free_y") +
+#   geom_text(aes(y = 0.7*percent)) +
+#   labs(title = "Bose Headphones Word Polarity (bing)") +
+#   coord_flip() + 
+#   theme_bw() +
+#   theme(plot.title = element_text(hjust = 0.5))
+# 
+
+```
